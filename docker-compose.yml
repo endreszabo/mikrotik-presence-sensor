@@ -1,0 +1,76 @@
+# MikroTik presence sensor + (optional) Mosquitto broker.
+#
+#   cp examples/config.yaml config.yaml    # edit devices, people, broker
+#   cp examples/env.example .env           # secrets / overrides (optional)
+#   docker compose up -d                   # sensor only, external broker
+#   docker compose --profile broker up -d  # also start a local Mosquitto
+#
+# Host networking is the default: RouterOS syslog is attributed to devices by
+# source address, and Docker's NAT / userland proxy would rewrite it (always
+# for IPv6 without an IPv6-enabled network). It also gives the container the
+# host's native IPv6 connectivity to your MikroTik devices.
+
+services:
+  mikrotik-presence-sensor:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    image: ghcr.io/endreszabo/mikrotik-presence-sensor:${VERSION:-latest}
+    container_name: mikrotik-presence-sensor
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      # - ./secrets:/run/secrets:ro          # e.g. MPS_MQTT_PASSWORD_FILE=/run/secrets/mqtt_password
+    environment:
+      MPS_CONFIG_FILE: /config/config.yaml
+      # Any setting can be overridden here, see docs/configuration.md, e.g.:
+      # MPS_LOG_FORMAT: json
+    env_file:
+      - path: .env
+        required: false
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/mikrotik-presence-sensor", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+    # --- Alternative: bridge networking -------------------------------------
+    # Remove network_mode above and uncomment below (and the networks block at
+    # the end). Published IPv4 ports keep the sender address (DNAT); IPv6 only
+    # does when the network has enable_ipv6 and the daemon runs with
+    # "userland-proxy": false. Otherwise syslog appears to come from the
+    # Docker gateway: add it to syslog.allowed_sources and accept that events
+    # can no longer trigger a re-poll of the sending device.
+    # networks: [presence]
+    # ports:
+    #   - "8080:8080/tcp"
+    #   - "5514:5514/udp"
+    #   - "5514:5514/tcp"
+
+  mosquitto:
+    profiles: [broker]
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./examples/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-h", "::1", "-t", "$$SYS/broker/uptime", "-C", "1", "-W", "3"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+# networks:
+#   presence:
+#     enable_ipv6: true
+
+volumes:
+  mosquitto-data:

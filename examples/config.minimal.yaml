@@ -1,0 +1,14 @@
+# Smallest useful configuration: one RouterOS 7 AP over REST, one person.
+mqtt:
+  broker: "tcp://[2001:db8:0:10::5]:1883"
+defaults:
+  rest:
+    username: presence
+    password: change-me
+    insecure_skip_verify: true   # replace with ca_file once certificates are set up
+devices:
+  - name: ap1
+    host: 2001:db8:0:10::2
+people:
+  - id: alice
+    macs: ["AA:BB:CC:00:00:01"]

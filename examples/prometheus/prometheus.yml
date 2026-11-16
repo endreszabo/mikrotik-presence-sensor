@@ -1,0 +1,9 @@
+# Scrape config snippet for mikrotik-presence-sensor.
+scrape_configs:
+  - job_name: mikrotik-presence
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["[2001:db8:0:10::5]:8080"]
+
+rule_files:
+  - alerts.yml

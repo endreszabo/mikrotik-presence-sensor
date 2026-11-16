@@ -1,0 +1,8 @@
+.git
+*.md
+docs/
+examples/
+config.yaml
+.env
+mikrotik-presence-sensor
+dist/

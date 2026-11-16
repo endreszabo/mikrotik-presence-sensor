@@ -1,0 +1,8 @@
+/mikrotik-presence-sensor
+/dist/
+/config.yaml
+/.env
+/secrets/
+*.swp
+*.swo
+*~

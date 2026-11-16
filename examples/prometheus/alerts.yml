@@ -1,0 +1,56 @@
+groups:
+  - name: mikrotik-presence
+    rules:
+      - alert: MikrotikPresenceDeviceDown
+        expr: mikrotik_presence_device_up == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Polling {{ $labels.device }} ({{ $labels.transport }}) fails"
+          description: "Check /status for the error. People seen only by this device may be reported away."
+
+      - alert: MikrotikPresenceDeviceStale
+        expr: time() - mikrotik_presence_device_last_success_timestamp_seconds > 600
+        labels: {severity: warning}
+        annotations:
+          summary: "No successful poll of {{ $labels.device }} for 10 minutes"
+
+      - alert: MikrotikPresencePollSlow
+        expr: |
+          histogram_quantile(0.95, sum by (device, kind, le) (
+            rate(mikrotik_presence_poll_kind_duration_seconds_bucket[15m]))) > 2
+        for: 15m
+        labels: {severity: info}
+        annotations:
+          summary: "Fetching {{ $labels.kind }} from {{ $labels.device }} takes {{ $value | humanizeDuration }} (p95)"
+
+      - alert: MikrotikPresenceAccessPointEmpty
+        # An AP that normally has clients reports none for an hour.
+        expr: |
+          mikrotik_presence_discovered_items{kind=~"wifi|wireless|capsman"} == 0
+            and max_over_time(mikrotik_presence_discovered_items{kind=~"wifi|wireless|capsman"}[1d]) > 0
+        for: 1h
+        labels: {severity: info}
+        annotations:
+          summary: "{{ $labels.device }} reports no {{ $labels.kind }} clients"
+
+      - alert: MikrotikPresenceSyslogSilent
+        # Remote logging configured but nothing received for 6 hours.
+        expr: time() - mikrotik_presence_syslog_last_message_timestamp_seconds > 6 * 3600
+        labels: {severity: info}
+        annotations:
+          summary: "No syslog from {{ $labels.device }} for 6 hours"
+
+      - alert: MikrotikPresenceSyslogRejected
+        expr: rate(mikrotik_presence_syslog_dropped_total[10m]) > 0
+        for: 10m
+        labels: {severity: info}
+        annotations:
+          summary: "Syslog from unauthorized senders is being dropped (see syslog.allowed_sources)"
+
+      - alert: MikrotikPresenceMQTTDisconnected
+        expr: mikrotik_presence_mqtt_connected == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "mikrotik-presence-sensor cannot reach the MQTT broker"

@@ -1,0 +1,118 @@
+# mikrotik-presence-sensor — full example configuration.
+#
+# Every key can be overridden by an environment variable: uppercase the path,
+# join with "_" and prefix with MPS_, e.g. mqtt.broker -> MPS_MQTT_BROKER,
+# devices[0].rest.username -> MPS_DEVICES_0_REST_USERNAME.
+# Lists are comma separated: MPS_PEOPLE_0_MACS=aa:bb:..,cc:dd:..
+# See docs/configuration.md for the complete reference.
+
+log:
+  format: zorp          # zorp (human friendly, default) or json
+  level: info           # debug, info, warn, error
+
+health:
+  listen: "[::]:8080"   # dual-stack; /healthz, /readyz, /status
+  require_mqtt: true    # report unhealthy while the broker is unreachable
+  metrics: true         # Prometheus metrics on /metrics
+
+mqtt:
+  broker: "tcp://[2001:db8:0:10::5]:1883"   # ssl://, mqtts://, ws://, wss:// also work
+  username: presence
+  # password: secret
+  password_file: /run/secrets/mqtt_password  # alternative to password
+  base_topic: mikrotik-presence
+  discovery_prefix: homeassistant
+  node_id: mikrotik_presence    # change when running several instances
+  keepalive: 30s
+  max_reconnect_interval: 1m
+  # tls:
+  #   ca_file: /config/ca.pem
+  #   cert_file: /config/client.pem
+  #   key_file: /config/client.key
+  #   server_name: mqtt.home.arpa
+
+presence:
+  # How long someone stays "home" after their last sighting. Absorbs roaming
+  # between APs, phones dozing off and missed polls.
+  consider_home: 3m
+  # Which tables count towards presence. Drop arp/neighbor if stale cache
+  # entries keep people home for too long on your network.
+  sources: [wifi, wireless, capsman, bridge_host, neighbor, arp, dhcp]
+  neighbor_states: [reachable, delay, probe]
+  arp_states: [reachable, delay, probe, dynamic]
+  stale_after_failed_polls: 3
+
+# Settings every device inherits unless it overrides them.
+defaults:
+  transport: rest       # rest (HTTPS, RouterOS 7) or snmp
+  kinds: [auto]         # probe what the device has; or list kinds; or [none]
+  poll_interval: 30s
+  timeout: 5s
+  rest:
+    port: 443
+    username: presence
+    password_file: /run/secrets/routeros_password
+    ca_file: /config/presence-ca.crt    # CA that signed the www-ssl certificates
+    # insecure_skip_verify: true        # only for testing self-signed certs
+  snmp:
+    port: 161
+    version: "3"
+    security_level: authPriv
+    username: presence
+    auth_protocol: SHA256
+    auth_password_file: /run/secrets/snmp_auth
+    priv_protocol: AES
+    priv_password_file: /run/secrets/snmp_priv
+
+devices:
+  # RouterOS 7 AP with the new wifi package (also a CAPsMAN controller).
+  - name: ap-living-room
+    host: 2001:db8:0:10::2
+    rest:
+      server_name: ap-living-room.home.arpa   # name in the certificate
+
+  # Older AP with the legacy wireless package, polled more often.
+  - name: ap-garden
+    host: ap-garden.home.arpa
+    kinds: [wireless]
+    poll_interval: 15s
+
+  # Core router: ARP, IPv6 neighbors and DHCP leases.
+  - name: core-router
+    host: 2001:db8:0:10::1
+    kinds: [neighbor, arp, dhcp]
+    # It also logs from its IPv4 address:
+    syslog_sources: [192.0.2.1]
+
+  # Switch polled over SNMP for its bridge FDB.
+  - name: switch-office
+    host: 2001:db8:0:10::3
+    transport: snmp
+    kinds: [bridge_host]
+
+  # A device that only sends logs (no polling).
+  - name: cap-attic
+    host: 2001:db8:0:10::4
+    kinds: [none]
+
+syslog:
+  enabled: true
+  udp_listen: "[::]:5514"
+  tcp_listen: "[::]:5514"
+  # Configured devices are always allowed; add other senders here.
+  allowed_sources: []
+  # Custom rules run before the built-in ones. "{mac}" expands to a MAC group.
+  rules:
+    # Pairs with examples/routeros/dhcp-lease-script.rsc
+    - name: lease-script
+      pattern: 'presence (?P<event>seen|leave) {mac}'
+      kind: dhcp
+
+people:
+  - id: alice
+    name: Alice
+    macs: ["AA:BB:CC:00:00:01"]
+  - id: bob
+    name: Bob
+    icon: mdi:account-tie
+    macs: ["AA:BB:CC:00:00:02", "AA:BB:CC:00:00:03"]   # phone + watch
